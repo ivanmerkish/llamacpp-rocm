@@ -263,6 +263,35 @@ jobs:
         Write-Host "Current llama.cpp commit:"
         git log --oneline -1
 
+    - name: Patch server-common.cpp (allow closed-think prefill)
+      run: |
+        $file = "llama.cpp/tools/server/server-common.cpp"
+        $content = Get-Content $file -Raw
+
+        # Replace unconditional prefill+thinking rejection with closed-</think> check
+        # last_message holds the assistant prefill content (popped from inputs.messages)
+        $old = 'if ( inputs.enable_thinking ) {
+            throw std::invalid_argument("Assistant response prefill is incompatible with enable_thinking.");
+        }'
+        $new = 'if ( inputs.enable_thinking ) {
+            // Allow prefill containing closed </think> block (ref: ggml-org/llama.cpp#21889)
+            bool has_closed_think = last_message.content.find("</think>") != std::string::npos;
+            for (const auto & p : last_message.content_parts) {
+                if (p.text.find("</think>") != std::string::npos) has_closed_think = true;
+            }
+            if (!has_closed_think) {
+                throw std::invalid_argument("Assistant response prefill is incompatible with enable_thinking unless prefill contains closed </think>.");
+            }
+        }'
+
+        if ($content.Contains('incompatible with enable_thinking')) {
+          $content = $content.Replace($old, $new)
+          Set-Content $file -Value $content -NoNewline
+          Write-Host "Patched server-common.cpp: allow closed-think prefill with enable_thinking"
+        } else {
+          Write-Host "WARNING: Pattern not found in server-common.cpp - patch may already be applied or code changed"
+        }
+
     - name: Build Llama.cpp + ROCm
       shell: cmd
       run: |
@@ -686,7 +715,34 @@ jobs:
         echo "Current llama.cpp commit:"
         git log --oneline -1
 
-        
+    - name: Patch server-common.cpp (allow closed-think prefill)
+      run: |
+        python3 - <<'PYEOF'
+        import re, sys
+        f = "llama.cpp/tools/server/server-common.cpp"
+        src = open(f).read()
+        # Match the 3-line block that unconditionally rejects prefill with thinking
+        pat = r'if \( inputs\.enable_thinking \) \{\s*throw std::invalid_argument\("Assistant response prefill is incompatible with enable_thinking\."\);\s*\}'
+        repl = """if ( inputs.enable_thinking ) {
+            // Allow prefill containing closed </think> block (ref: ggml-org/llama.cpp#21889)
+            bool has_closed_think = last_message.content.find("</think>") != std::string::npos;
+            for (const auto & p : last_message.content_parts) {
+                if (p.text.find("</think>") != std::string::npos) has_closed_think = true;
+            }
+            if (!has_closed_think) {
+                throw std::invalid_argument("Assistant response prefill is incompatible with enable_thinking unless prefill contains closed </think>.");
+            }
+        }"""
+        new, n = re.subn(pat, repl, src)
+        if n:
+            open(f, 'w').write(new)
+            print(f"Patched {n} occurrence(s) in {f}")
+        else:
+            print(f"WARNING: Pattern not found in {f} - patch may already be applied or code changed")
+            sys.exit(1)
+        PYEOF
+
+
     - name: Build Llama.cpp + ROCm
       run: |
         # Map GPU targets
