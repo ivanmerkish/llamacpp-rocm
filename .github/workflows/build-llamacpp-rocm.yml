@@ -263,7 +263,7 @@ jobs:
         Write-Host "Current llama.cpp commit:"
         git log --oneline -1
 
-    - name: Patch server-common.cpp (allow closed-think prefill)
+    - name: Patch server-common.cpp (allow any assistant prefill with thinking)
       shell: python
       run: |
         import re, sys
@@ -271,14 +271,8 @@ jobs:
         src = open(f).read()
         pat = r'if \( inputs\.enable_thinking \) \{\s*throw std::invalid_argument\("Assistant response prefill is incompatible with enable_thinking\."\);\s*\}'
         repl = """if ( inputs.enable_thinking ) {
-            // Allow prefill containing closed </think> block (ref: ggml-org/llama.cpp#21889)
-            bool has_closed_think = last_message.content.find("</think>") != std::string::npos;
-            for (const auto & p : last_message.content_parts) {
-                if (p.text.find("</think>") != std::string::npos) has_closed_think = true;
-            }
-            if (!has_closed_think) {
-                throw std::invalid_argument("Assistant response prefill is incompatible with enable_thinking unless prefill contains closed </think>.");
-            }
+            // Allow assistant prefill with enable_thinking (ref: ggml-org/llama.cpp#21889)
+            // Prefill may contain context in closed </think> or open <think> for model to continue
         }"""
         new, n = re.subn(pat, repl, src)
         if n:
@@ -711,7 +705,7 @@ jobs:
         echo "Current llama.cpp commit:"
         git log --oneline -1
 
-    - name: Patch server-common.cpp (allow closed-think prefill)
+    - name: Patch server-common.cpp (allow any assistant prefill with thinking)
       run: |
         python3 - <<'PYEOF'
         import re, sys
@@ -720,14 +714,8 @@ jobs:
         # Match the 3-line block that unconditionally rejects prefill with thinking
         pat = r'if \( inputs\.enable_thinking \) \{\s*throw std::invalid_argument\("Assistant response prefill is incompatible with enable_thinking\."\);\s*\}'
         repl = """if ( inputs.enable_thinking ) {
-            // Allow prefill containing closed </think> block (ref: ggml-org/llama.cpp#21889)
-            bool has_closed_think = last_message.content.find("</think>") != std::string::npos;
-            for (const auto & p : last_message.content_parts) {
-                if (p.text.find("</think>") != std::string::npos) has_closed_think = true;
-            }
-            if (!has_closed_think) {
-                throw std::invalid_argument("Assistant response prefill is incompatible with enable_thinking unless prefill contains closed </think>.");
-            }
+            // Allow assistant prefill with enable_thinking (ref: ggml-org/llama.cpp#21889)
+            // Prefill may contain context in closed </think> or open <think> for model to continue
         }"""
         new, n = re.subn(pat, repl, src)
         if n:
